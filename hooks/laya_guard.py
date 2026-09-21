@@ -12,6 +12,7 @@ import json
 import os
 import secrets
 import subprocess
+import time
 import sys
 import urllib.error
 import urllib.request
@@ -19,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 STATE = Path.home() / ".claude" / "laya-guard.json"
+LOCK = Path.home() / ".claude" / "laya-guard.starting"
 LOG = Path.home() / ".claude" / "laya-guard.log"
 DENY_AT = float(os.environ.get("LAYA_DENY_AT", "0.8"))
 IDLE_EXIT = 1800  # seconds with no request before the daemon retires
@@ -68,6 +70,7 @@ def serve():
     srv = Server(("127.0.0.1", 0), Handler)
     STATE.write_text(json.dumps({"port": srv.server_address[1], "token": token, "pid": os.getpid()}))
     STATE.chmod(0o600)
+    LOCK.unlink(missing_ok=True)  # bound and serving; the next client can connect
     while True:
         srv.handle_request()
 
@@ -82,7 +85,25 @@ def _state():
 
 
 def spawn():
-    """Start the daemon detached so it survives this short-lived hook process."""
+    """Start the daemon detached, but only one at a time.
+
+    The checkpoint takes ~40 s to build and each daemon holds ~2 GB. Without this
+    guard, every Bash command issued during the warm-up spawns another daemon.
+    """
+    try:
+        # O_EXCL makes the winner unambiguous; a stale lock from a crashed start
+        # is reclaimed after the warm-up window.
+        os.close(os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        try:
+            if time.time() - LOCK.stat().st_mtime < 180:
+                return
+            LOCK.unlink()
+            os.close(os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except OSError:
+            return
+    except OSError:
+        return
     kw = {"stdout": LOG.open("ab"), "stderr": subprocess.STDOUT, "close_fds": True}
     if sys.platform == "win32":
         kw["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
