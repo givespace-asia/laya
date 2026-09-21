@@ -5,28 +5,34 @@ Requires: pip install laya fastmcp
 import os
 import ssl
 import sys
+import time
 from pathlib import Path
+
+_SERVER_AUTH = "1.3.6.1.5.5.7.3.1"  # EKU: TLS server authentication
+_CA_MAX_AGE = 7 * 86400
 
 
 def _ensure_ca():
-    """Point Python at a CA bundle that includes the Windows cert store.
+    """Point Python at a CA bundle of certifi plus the Windows ROOT trust anchors.
 
     TLS-intercepting antivirus (Norton, Kaspersky, corporate proxies) installs its
     root into the Windows store only. Python's ssl never reads that store, so model
     downloads from HuggingFace fail with CERTIFICATE_VERIFY_FAILED while curl works.
+
+    Only the ROOT store is read, and only anchors Windows itself trusts for server
+    auth: the intermediate ("CA") store holds AIA-cached certs that are not trust
+    anchors, and promoting those would trust issuers the OS does not. The bundle is
+    rebuilt weekly so revoked or rotated anchors do not linger.
     """
     if sys.platform != "win32" or "SSL_CERT_FILE" in os.environ:
         return
     bundle = Path.home() / ".claude" / "laya-ca-bundle.pem"
-    if not bundle.exists():
-        try:
-            import certifi
-        except ImportError:
-            return
+    if not (bundle.exists() and time.time() - bundle.stat().st_mtime < _CA_MAX_AGE):
+        import certifi  # hard dependency of huggingface_hub; absence is a real error
         pems = [Path(certifi.where()).read_text()]
         pems += [ssl.DER_cert_to_PEM_cert(der)
-                 for store in ("ROOT", "CA")
-                 for der, enc, _ in ssl.enum_certificates(store) if enc == "x509_asn"]
+                 for der, enc, trust in ssl.enum_certificates("ROOT")
+                 if enc == "x509_asn" and (trust is True or _SERVER_AUTH in trust)]
         bundle.parent.mkdir(parents=True, exist_ok=True)
         bundle.write_text("\n".join(pems))
     os.environ["SSL_CERT_FILE"] = os.environ["REQUESTS_CA_BUNDLE"] = str(bundle)
@@ -55,6 +61,8 @@ def agent():
 
 
 def _noul(state, questions):
+    """Score each question. Raises rather than returning a permissive default:
+    a guardrail that cannot run must not look like a guardrail that passed."""
     answers = agent().predict(state, questions)["answers"]
     return {k: round(float(answers[k]["noul"]), 4) for k in questions}
 
@@ -69,7 +77,8 @@ def evaluate_shell_safety(command: str) -> dict:
     })
     risk = max(scores.values())
     return {"command": command, "scores": scores, "risk": round(risk, 4),
-            "verdict": "block" if risk >= 0.8 else "warn" if risk >= 0.5 else "allow"}
+            "verdict": "block" if risk >= 0.8 else "warn" if risk >= 0.5 else "allow",
+            "advisory": "Laya scores intent, not syntax. An 'allow' is not proof of safety."}
 
 
 @mcp.tool
@@ -82,7 +91,8 @@ def evaluate_code_quality(task_description: str, code_patch: str) -> dict:
     })
     ok = min(scores.values())
     return {"scores": scores, "confidence": round(ok, 4),
-            "verdict": "pass" if ok >= 0.6 else "review" if ok >= 0.35 else "reject"}
+            "verdict": "pass" if ok >= 0.6 else "review" if ok >= 0.35 else "reject",
+            "advisory": "Weaker signal than evaluate_shell_safety; treat as a warning, not a gate."}
 
 
 if __name__ == "__main__":

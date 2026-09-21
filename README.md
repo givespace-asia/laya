@@ -34,9 +34,11 @@ git status                   -> risk 0.114  allow
   intercept every Bash call. Add a `PreToolUse` hook if you need hard enforcement.
 - **`evaluate_code_quality` is noisier than `evaluate_shell_safety`.** On short task
   descriptions `addresses_task` under-reports. Treat it as a warning signal, not a gate.
-- **Windows + TLS-intercepting antivirus.** The server builds a CA bundle from the
-  Windows cert store on first run, because Python's `ssl` cannot see it. Override with
-  `SSL_CERT_FILE`.
+- **Windows + TLS-intercepting antivirus.** The server builds a CA bundle from
+  certifi plus the Windows **ROOT** store on first run, because Python's `ssl` cannot
+  see it. Only anchors Windows trusts for TLS server auth are included, and the bundle
+  is rebuilt weekly so revoked or rotated anchors do not linger. Set `SSL_CERT_FILE`
+  yourself to skip this entirely.
 
 ## Config
 
