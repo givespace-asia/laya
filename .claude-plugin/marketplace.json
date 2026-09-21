@@ -1,0 +1,14 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "laya-guard",
+  "description": "Laya-backed guardrails for Claude Code.",
+  "owner": { "name": "gives" },
+  "plugins": [
+    {
+      "name": "laya-guard",
+      "description": "Evaluate shell commands and code patches with Laya's calibrated `noul` primitive.",
+      "source": "./",
+      "category": "security"
+    }
+  ]
+}

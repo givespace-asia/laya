@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "laya-guard": {
+      "command": "python",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/laya_mcp_server.py"]
+    }
+  }
+}
