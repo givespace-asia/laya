@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "laya-guard",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Shell-command and code-patch guardrails backed by Laya, a non-autoregressive decision model. Calibrated probabilities, no text generation to parse.",
   "keywords": [
     "security",
@@ -10,5 +10,6 @@
     "laya"
   ],
   "license": "Apache-2.0",
-  "homepage": "https://github.com/givespace-asia/laya"
+  "homepage": "https://github.com/givespace-asia/laya",
+  "hooks": "./hooks/hooks.json"
 }
