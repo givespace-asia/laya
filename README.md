@@ -12,7 +12,7 @@ Install a CUDA torch build if the CPU figure is too slow for your workflow.
 
 ```bash
 pip install laya fastmcp
-claude plugin marketplace add GITHUB_OWNER/laya-guard
+claude plugin marketplace add givespace-asia/laya
 claude plugin install laya-guard@laya-guard
 ```
 
