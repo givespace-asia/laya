@@ -2,14 +2,17 @@
 
 Shell-command and code-patch guardrails for Claude Code, backed by
 [Laya](https://github.com/NandhaKishorM/laya) — a non-autoregressive decision model
-that returns calibrated probabilities in a single forward pass (~40 ms). No text
-generation, so there is nothing to parse and nothing to hallucinate.
+that returns calibrated probabilities in a single forward pass. No text generation,
+so there is nothing to parse and nothing to hallucinate.
+
+Measured latency: **~33 ms** on a T4 GPU, **~490 ms** on a CPU-only torch build.
+Install a CUDA torch build if the CPU figure is too slow for your workflow.
 
 ## Install
 
 ```bash
 pip install laya fastmcp
-claude plugin marketplace add <this-repo-or-path>
+claude plugin marketplace add GITHUB_OWNER/laya-guard
 claude plugin install laya-guard@laya-guard
 ```
 
@@ -42,7 +45,13 @@ git status                   -> risk 0.114  allow
 
 ## Config
 
-`LAYA_MODEL` selects the checkpoint (default `convaiinnovations/laya`; use
-`convaiinnovations/laya-multilingual` for 100+ languages).
+Laya has no API key — the model runs locally. `HF_TOKEN` is only needed for gated
+HuggingFace repos, and `convaiinnovations/laya` is public.
 
-Thresholds live in `laya_mcp_server.py` — edit them directly.
+| Variable | Default | Purpose |
+|---|---|---|
+| `LAYA_MODEL` | `convaiinnovations/laya` | Checkpoint. Use `convaiinnovations/laya-multilingual` for 100+ languages. |
+| `SSL_CERT_FILE` | auto-built on Windows | Set it yourself to skip CA-bundle generation entirely. |
+
+Set them under `env` in the plugin's `.mcp.json`. Thresholds live in
+`laya_mcp_server.py` — edit them directly.
