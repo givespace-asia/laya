@@ -49,7 +49,9 @@ def serve():
             body = self.rfile.read(int(self.headers["Content-Length"]))
             cmd = json.loads(body)["command"]
             ans = a.predict({"command": cmd}, QUESTIONS)["answers"]
-            out = json.dumps({k: round(float(ans[k]["noul"]), 4) for k in QUESTIONS}).encode()
+            scores = {k: round(float(ans[k]["noul"]), 4) for k in QUESTIONS}
+            print(f"{time.strftime('%H:%M:%S')} risk={max(scores.values()):.3f} {cmd[:90]}", flush=True)
+            out = json.dumps(scores).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(out)))
