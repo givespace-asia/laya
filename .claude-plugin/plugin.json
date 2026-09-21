@@ -3,6 +3,12 @@
   "name": "laya-guard",
   "version": "0.1.0",
   "description": "Shell-command and code-patch guardrails backed by Laya, a non-autoregressive decision model. Calibrated probabilities, no text generation to parse.",
-  "keywords": ["security", "guardrail", "evaluation", "laya"],
-  "license": "Apache-2.0"
+  "keywords": [
+    "security",
+    "guardrail",
+    "evaluation",
+    "laya"
+  ],
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/givespace-asia/laya"
 }

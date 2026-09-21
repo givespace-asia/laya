@@ -2,7 +2,10 @@
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "laya-guard",
   "description": "Laya-backed guardrails for Claude Code.",
-  "owner": { "name": "gives" },
+  "owner": {
+    "name": "givespace-asia",
+    "url": "https://github.com/givespace-asia"
+  },
   "plugins": [
     {
       "name": "laya-guard",
