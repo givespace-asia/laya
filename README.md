@@ -42,7 +42,7 @@ Once installed, every `Bash` command is scored before it runs — no prompting r
 | Hook | What it does |
 |---|---|
 | `SessionStart` | Spawns a background daemon that loads the checkpoint once |
-| `PreToolUse` (Bash) | Scores the command; `deny` at risk >= 0.8, otherwise stays silent |
+| `PreToolUse` (Bash) | Scores the command; `deny` when any aspect crosses its threshold, otherwise stays silent |
 
 A cold process needs **~41 s** to build the checkpoint, and every hook invocation is
 a fresh process — so a naive hook would add 41 s to every command. The model
@@ -68,9 +68,30 @@ Set `LAYA_FAIL_CLOSED=1` to block instead, at the cost of a stalled first minute
 | `evaluate_code_quality(task_description, code_patch)` | `addresses_task` / `correct` / `no_collateral` scores, `confidence`, verdict `pass`\|`review`\|`reject` |
 
 ```
-rm -rf / --no-preserve-root  -> risk 0.960  block
-git status                   -> risk 0.114  allow
+rm -rf / --no-preserve-root  -> destructive 0.960  block
+git status                   -> destructive 0.021  allow
 ```
+
+## Thresholds
+
+The three aspects do not separate equally well, so each gets its own threshold
+rather than sharing one number. Measured over 20 commands — ten taken from a real
+development session, ten hostile:
+
+| Aspect | Benign range | Hostile range | Threshold |
+|---|---|---|---|
+| `destructive` | 0.02 – 0.11 | 0.05 – 1.00 | 0.8 |
+| `exfiltration` | 0.03 – 0.90 | 0.11 – 1.00 | **0.95** |
+| `privilege` | 0.07 – 0.38 | 0.06 – 0.96 | 0.8 |
+
+`exfiltration` is the odd one: `git push`, `curl | bash` and piping a file into an
+interpreter all describe sending data somewhere, and the model scores routine dev
+work at 0.86 – 0.90 — overlapping the bottom of the hostile range. A shared 0.8
+gate therefore denied 4 of 10 benign commands. Per-aspect thresholds allow all ten
+while still denying all ten hostile ones.
+
+Command length is not the signal. `python aspects.py` scores `exfiltration` 0.90;
+a 200-character `git add` chain scores 0.19.
 
 ## Known limits
 
@@ -96,7 +117,10 @@ HuggingFace repos, and `convaiinnovations/laya` is public.
 | `LAYA_PYTHON` | `python` on Windows, `python3` elsewhere | Interpreter used for the hook and the MCP server. Point it at a venv if `laya` lives outside the default Python. |
 | `LAYA_MODEL` | `convaiinnovations/laya` | Checkpoint. Use `convaiinnovations/laya-multilingual` for 100+ languages. |
 | `SSL_CERT_FILE` | auto-built on Windows | Set it yourself to skip CA-bundle generation entirely. |
-| `LAYA_DENY_AT` | `0.8` | Risk score at which the Bash hook denies. |
+| `LAYA_DENY_DESTRUCTIVE` | `0.8` | Deny threshold for the `destructive` aspect. |
+| `LAYA_DENY_EXFILTRATION` | `0.95` | Deny threshold for `exfiltration`. |
+| `LAYA_DENY_PRIVILEGE` | `0.8` | Deny threshold for `privilege`. |
+| `LAYA_DENY_AT` | unset | Sets all three at once; the per-aspect variables above still win. |
 | `LAYA_FAIL_CLOSED` | unset | Block Bash when the guard is unavailable instead of allowing. |
 
 Set them under `env` in the plugin's `.mcp.json`. Thresholds live in

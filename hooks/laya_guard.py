@@ -7,10 +7,12 @@ that imports nothing heavier than the standard library.
     python laya_guard.py daemon   # serve; binds the port only once the model is ready
     python laya_guard.py warm     # spawn the daemon detached (SessionStart)
     python laya_guard.py check    # PreToolUse: stdin hook JSON -> stdout decision
+    python laya_guard.py selftest # assert the segment splitter, no model needed
 """
 import json
 import os
 import secrets
+import shlex
 import subprocess
 import time
 import sys
@@ -22,7 +24,15 @@ from pathlib import Path
 STATE = Path.home() / ".claude" / "laya-guard.json"
 LOCK = Path.home() / ".claude" / "laya-guard.starting"
 LOG = Path.home() / ".claude" / "laya-guard.log"
-DENY_AT = float(os.environ.get("LAYA_DENY_AT", "0.8"))
+# One threshold per aspect, because the three do not separate equally well.
+# Measured on this repo's commands (see README "Thresholds"): `destructive` splits
+# cleanly, but ordinary dev work -- git push, piping into an interpreter -- lands at
+# 0.86-0.93 on `exfiltration`, right where real exfiltration starts.
+_BASE = os.environ.get("LAYA_DENY_AT")
+DENY_AT = {
+    aspect: float(os.environ.get(f"LAYA_DENY_{aspect.upper()}", _BASE or default))
+    for aspect, default in (("destructive", 0.8), ("exfiltration", 0.95), ("privilege", 0.8))
+}
 IDLE_EXIT = 1800  # seconds with no request before the daemon retires
 
 QUESTIONS = {
@@ -48,10 +58,16 @@ def serve():
                 self.send_response(403); self.end_headers(); return
             body = self.rfile.read(int(self.headers["Content-Length"]))
             cmd = json.loads(body)["command"]
-            ans = a.predict({"command": cmd}, QUESTIONS)["answers"]
-            scores = {k: round(float(ans[k]["noul"]), 4) for k in QUESTIONS}
-            print(f"{time.strftime('%H:%M:%S')} risk={max(scores.values()):.3f} {cmd[:90]}", flush=True)
-            out = json.dumps(scores).encode()
+            # A list asks for each piece scored on its own; laya takes one state per
+            # call, so this is a loop, not a batch.
+            batch = cmd if isinstance(cmd, list) else [cmd]
+            result = []
+            for c in batch:
+                ans = a.predict({"command": c}, QUESTIONS)["answers"]
+                scores = {k: round(float(ans[k]["noul"]), 4) for k in QUESTIONS}
+                print(f"{time.strftime('%H:%M:%S')} risk={max(scores.values()):.3f} {c[:90]}", flush=True)
+                result.append(scores)
+            out = json.dumps(result if isinstance(cmd, list) else result[0]).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(out)))
@@ -78,6 +94,56 @@ def serve():
 
 
 # --------------------------------------------------------------------- client
+
+OPERATORS = {"&&", "||", ";", "|", "&"}
+MAX_SEGMENTS = 8  # scoring is ~0.5 s per segment on CPU; bound the worst case
+
+
+def segments(command):
+    """Split a shell line into the commands it actually runs, quote-aware.
+
+    Scoring `cd x && git add -A && git push` as one blob inflates the risk: the
+    model sees redirections, system paths and chaining all at once. Each piece on
+    its own scores like the small command it is.
+
+    Returns [command] unchanged whenever splitting is unsafe or pointless.
+    """
+    if "<<" in command:
+        return [command]  # a heredoc body is data; shlex would read it as commands
+    lex = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    try:
+        tokens = list(lex)
+    except ValueError:
+        return [command]  # unbalanced quotes: not ours to guess at
+    parts, current = [], []
+    for token in tokens:
+        if token in OPERATORS:
+            if current:
+                parts.append(shlex.join(current))
+                current = []
+        else:
+            current.append(token)
+    if current:
+        parts.append(shlex.join(current))
+    if len(parts) < 2 or len(parts) > MAX_SEGMENTS:
+        return [command]
+    return parts
+
+
+def selftest():
+    assert segments("git status") == ["git status"]
+    assert segments("git add -A && git status") == ["git add -A", "git status"]
+    assert segments("a; b | c || d") == ["a", "b", "c", "d"]
+    # operators inside quotes are text, not separators
+    assert segments("echo 'a && b'") == ["echo 'a && b'"]
+    # heredocs and unbalanced quotes fall back to the whole line
+    assert segments("cat > f <<'EOF'\nx && y\nEOF") == ["cat > f <<'EOF'\nx && y\nEOF"]
+    assert segments("echo \"unclosed") == ["echo \"unclosed"]
+    # a chain longer than the cap stays whole rather than costing 9 forward passes
+    assert len(segments(" && ".join(["a"] * 9))) == 1
+    print("selftest ok")
+
 
 def _state():
     try:
@@ -150,16 +216,34 @@ def check():
         print("laya-guard: warming up, command not checked", file=sys.stderr)
         sys.exit(0)
 
-    risk = max(scores.values())
-    if risk >= DENY_AT:
-        top = max(scores, key=scores.get)
+    def tripped(s):
+        return [a for a in s if s[a] >= DENY_AT[a]]
+
+    culprit = command
+    if tripped(scores):
+        # Second pass, only on the path that was about to deny: re-score each piece
+        # of the chain alone. Costs nothing in the common case, and a chain that only
+        # looked dangerous as a blob clears here.
+        parts = segments(command)
+        if len(parts) > 1:
+            try:
+                per_part = score(parts, timeout=10 + 5 * len(parts))
+            except (urllib.error.URLError, OSError, ValueError):
+                per_part = None
+            if per_part:
+                worst = max(range(len(parts)), key=lambda i: max(per_part[i].values()))
+                scores, culprit = per_part[worst], parts[worst]
+
+    over = tripped(scores)
+    if over:
+        top = max(over, key=scores.get)
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": (
-                f"Laya scored this {top} at {scores[top]:.2f} (threshold {DENY_AT}). "
-                f"All scores: {scores}. Explain the command to the user and let them "
-                f"decide, or run a narrower version."),
+                f"Laya scored `{culprit}` {top} at {scores[top]:.2f} "
+                f"(threshold {DENY_AT[top]}). All scores: {scores}. Explain the command "
+                f"to the user and let them decide, or run a narrower version."),
         }}))
     # Below the threshold we stay silent: exit 0 with no decision means the normal
     # permission flow still applies. Silence is not approval.
@@ -170,6 +254,8 @@ if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "check"
     if mode == "daemon":
         serve()
+    elif mode == "selftest":
+        selftest()
     elif mode == "warm":
         try:
             warm = score("true", timeout=2) is not None
