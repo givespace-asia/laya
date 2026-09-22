@@ -1,8 +1,12 @@
 {
   "mcpServers": {
     "laya-guard": {
-      "command": "python",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/laya_mcp_server.py"]
+      "command": "bash",
+      "args": [
+        "-c",
+        "PY=${LAYA_PYTHON:-$([ \"$OS\" = Windows_NT ] && echo python || echo python3)}; exec \"$PY\" \"$0\"",
+        "${CLAUDE_PLUGIN_ROOT}/laya_mcp_server.py"
+      ]
     }
   }
 }

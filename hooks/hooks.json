@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/laya_guard.py\" warm",
+            "command": "PY=${LAYA_PYTHON:-$([ \"$OS\" = Windows_NT ] && echo python || echo python3)}; \"$PY\" \"${CLAUDE_PLUGIN_ROOT}/hooks/laya_guard.py\" warm",
             "timeout": 10,
             "statusMessage": "Warming Laya guard..."
           }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"${CLAUDE_PLUGIN_ROOT}/hooks/laya_guard.py\" check",
+            "command": "PY=${LAYA_PYTHON:-$([ \"$OS\" = Windows_NT ] && echo python || echo python3)}; \"$PY\" \"${CLAUDE_PLUGIN_ROOT}/hooks/laya_guard.py\" check",
             "timeout": 15
           }
         ]

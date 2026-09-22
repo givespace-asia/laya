@@ -10,6 +10,10 @@ Install a CUDA torch build if the CPU figure is too slow for your workflow.
 
 ## Install
 
+Works on Windows, macOS and Linux with the same two commands — Claude Code runs
+hooks through bash on every platform, so the plugin picks its own interpreter and
+device at runtime (see [Platform support](#platform-support)).
+
 ```bash
 pip install laya fastmcp
 claude plugin marketplace add givespace-asia/laya
@@ -18,6 +22,18 @@ claude plugin install laya-guard@laya-guard
 
 Restart Claude Code. The first check downloads the ~850 MB checkpoint from
 HuggingFace; every check after that is cached.
+
+## Platform support
+
+| Varies by machine | How it is resolved |
+|---|---|
+| Interpreter name | `python` on Windows (where `python3` is usually the Microsoft Store stub pointing at a different install), `python3` elsewhere. Override with `LAYA_PYTHON`. |
+| Compute device | Laya itself picks CUDA → Apple MPS → CPU, and falls back to CPU on an out-of-memory error. Nothing to configure. |
+| TLS-intercepting antivirus | Windows only: a CA bundle is built from certifi plus the Windows ROOT store. Skipped entirely on macOS and Linux. |
+| Detached daemon | `DETACHED_PROCESS` on Windows, `start_new_session` on POSIX. |
+
+If the plugin must use a specific interpreter — a virtualenv, `pyenv`, conda —
+export `LAYA_PYTHON=/path/to/python` before starting Claude Code.
 
 ## Automatic enforcement
 
@@ -77,6 +93,7 @@ HuggingFace repos, and `convaiinnovations/laya` is public.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `LAYA_PYTHON` | `python` on Windows, `python3` elsewhere | Interpreter used for the hook and the MCP server. Point it at a venv if `laya` lives outside the default Python. |
 | `LAYA_MODEL` | `convaiinnovations/laya` | Checkpoint. Use `convaiinnovations/laya-multilingual` for 100+ languages. |
 | `SSL_CERT_FILE` | auto-built on Windows | Set it yourself to skip CA-bundle generation entirely. |
 | `LAYA_DENY_AT` | `0.8` | Risk score at which the Bash hook denies. |
